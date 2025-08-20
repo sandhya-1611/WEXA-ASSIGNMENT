@@ -11,7 +11,9 @@ app.use(express.json());
 const authRoutes = require("./routes/authRoutes");
 const ticketRoutes = require("./routes/ticketRoutes");
 const kbRoutes = require("./routes/kbRoutes");
+const agentRoutes = require("./routes/agentRoutes");
 
+app.use("/api/agent", agentRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/tickets", ticketRoutes);
 app.use("/api/kb", kbRoutes);
