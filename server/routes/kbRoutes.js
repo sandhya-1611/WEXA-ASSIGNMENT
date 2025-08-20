@@ -3,7 +3,6 @@ const KnowledgeBase = require("../models/KnowledgeBase");
 const authMiddleware = require("../middleware/authMiddleware");
 
 const router = express.Router();
-
 router.post("/", authMiddleware, async (req, res) => {
   try {
     const kb = new KnowledgeBase({
