@@ -1,8 +1,12 @@
+const express = require("express");
+const router = express.Router();
+const { v4: uuidv4 } = require("uuid");
+
 const Config = require("../models/Config");
 const Ticket = require("../models/Ticket");
 const AgentSuggestion = require("../models/AgentSuggestion");
 const KnowledgeBase = require("../models/KnowledgeBase");
-const { v4: uuidv4 } = require("uuid");
+const AuditLog = require("../models/AuditLog");
 
 router.post("/triage", async (req, res) => {
   try {
@@ -27,6 +31,15 @@ router.post("/triage", async (req, res) => {
       confidence = 0.8;
     }
 
+    await AuditLog.create({
+      ticketId: ticket._id,
+      traceId,
+      actor: "system",
+      action: "AGENT_CLASSIFIED",
+      meta: { predictedCategory, confidence },
+      timestamp: new Date()
+    });
+
     const kbArticles = await KnowledgeBase.find(
       { $text: { $search: text }, status: "published" },
       { score: { $meta: "textScore" } }
@@ -36,9 +49,27 @@ router.post("/triage", async (req, res) => {
 
     const citations = kbArticles.map((a) => a._id);
 
+    await AuditLog.create({
+      ticketId: ticket._id,
+      traceId,
+      actor: "system",
+      action: "KB_RETRIEVED",
+      meta: { citations },
+      timestamp: new Date()
+    });
+
     const draftReply = `Hi, based on our KB: \n${kbArticles
       .map((a, i) => `${i + 1}. ${a.question}`)
       .join("\n")}`;
+
+    await AuditLog.create({
+      ticketId: ticket._id,
+      traceId,
+      actor: "system",
+      action: "DRAFT_GENERATED",
+      meta: { draftReply },
+      timestamp: new Date()
+    });
 
     const config = await Config.findOne({});
     let autoClosed = false;
@@ -48,9 +79,27 @@ router.post("/triage", async (req, res) => {
       ticket.updatedAt = new Date();
       await ticket.save();
       autoClosed = true;
+
+      await AuditLog.create({
+        ticketId: ticket._id,
+        traceId,
+        actor: "system",
+        action: "AUTO_CLOSED",
+        meta: { confidence, threshold: config.confidenceThreshold },
+        timestamp: new Date()
+      });
     } else {
       ticket.status = "waiting_human";
       await ticket.save();
+
+      await AuditLog.create({
+        ticketId: ticket._id,
+        traceId,
+        actor: "system",
+        action: "ASSIGNED_TO_HUMAN",
+        meta: {},
+        timestamp: new Date()
+      });
     }
 
     const suggestion = await AgentSuggestion.create({
@@ -75,3 +124,5 @@ router.post("/triage", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+module.exports = router;
