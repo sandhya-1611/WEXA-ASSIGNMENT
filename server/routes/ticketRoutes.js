@@ -9,8 +9,8 @@ router.post("/", authMiddleware, async (req, res) => {
     const ticket = new Ticket({
       title: req.body.title,
       description: req.body.description,
-      priority: req.body.priority || "medium",
-      user: req.user.id
+      category: req.body.category || "other",
+      createdBy: req.user.id,
     });
 
     await ticket.save();
@@ -22,37 +22,27 @@ router.post("/", authMiddleware, async (req, res) => {
 
 router.get("/", authMiddleware, async (req, res) => {
   try {
-    const tickets = await Ticket.find({ user: req.user.id });
+    let tickets;
+    if (req.user.role === "user") {
+      tickets = await Ticket.find({ createdBy: req.user.id }).sort({ createdAt: -1 });
+    } else {
+      tickets = await Ticket.find().sort({ createdAt: -1 });
+    }
     res.json(tickets);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.put("/:id", authMiddleware, async (req, res) => {
+router.get("/:id", authMiddleware, async (req, res) => {
   try {
-    const updated = await Ticket.findOneAndUpdate(
-      { _id: req.params.id, user: req.user.id },
-      req.body,
-      { new: true }
-    );
+    const ticket = await Ticket.findById(req.params.id);
+    if (!ticket) return res.status(404).json({ message: "Ticket not found" });
 
-    if (!updated) return res.status(404).json({ message: "Ticket not found" });
-    res.json(updated);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.delete("/:id", authMiddleware, async (req, res) => {
-  try {
-    const deleted = await Ticket.findOneAndDelete({
-      _id: req.params.id,
-      user: req.user.id
-    });
-
-    if (!deleted) return res.status(404).json({ message: "Ticket not found" });
-    res.json({ message: "Ticket deleted successfully" });
+    if (req.user.role === "user" && ticket.createdBy.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    res.json(ticket);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
