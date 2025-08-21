@@ -2,24 +2,27 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 
-const Config = require("../models/Config");
 const Ticket = require("../models/Ticket");
 const AgentSuggestion = require("../models/AgentSuggestion");
 const KnowledgeBase = require("../models/KnowledgeBase");
+const Config = require("../models/Config");
 const AuditLog = require("../models/AuditLog");
 
+// POST /api/agent/triage
 router.post("/triage", async (req, res) => {
   try {
     const { ticketId } = req.body;
+
     const ticket = await Ticket.findById(ticketId);
     if (!ticket) return res.status(404).json({ message: "Ticket not found" });
 
     const traceId = uuidv4();
+    const text = ticket.title + " " + ticket.description;
 
+    // 1️⃣ Classify ticket
     let predictedCategory = "other";
     let confidence = 0.5;
 
-    const text = ticket.title + " " + ticket.description;
     if (/refund|invoice/i.test(text)) {
       predictedCategory = "billing";
       confidence = 0.9;
@@ -40,6 +43,7 @@ router.post("/triage", async (req, res) => {
       timestamp: new Date()
     });
 
+    // 2️⃣ Retrieve top KB articles
     const kbArticles = await KnowledgeBase.find(
       { $text: { $search: text }, status: "published" },
       { score: { $meta: "textScore" } }
@@ -54,10 +58,11 @@ router.post("/triage", async (req, res) => {
       traceId,
       actor: "system",
       action: "KB_RETRIEVED",
-      meta: { citations },
+      meta: { articleIds: citations },
       timestamp: new Date()
     });
 
+    // 3️⃣ Draft reply
     const draftReply = `Hi, based on our KB: \n${kbArticles
       .map((a, i) => `${i + 1}. ${a.question}`)
       .join("\n")}`;
@@ -71,6 +76,7 @@ router.post("/triage", async (req, res) => {
       timestamp: new Date()
     });
 
+    // 4️⃣ Decision: auto-close or assign to human
     const config = await Config.findOne({});
     let autoClosed = false;
 
@@ -79,29 +85,21 @@ router.post("/triage", async (req, res) => {
       ticket.updatedAt = new Date();
       await ticket.save();
       autoClosed = true;
-
-      await AuditLog.create({
-        ticketId: ticket._id,
-        traceId,
-        actor: "system",
-        action: "AUTO_CLOSED",
-        meta: { confidence, threshold: config.confidenceThreshold },
-        timestamp: new Date()
-      });
     } else {
       ticket.status = "waiting_human";
       await ticket.save();
-
-      await AuditLog.create({
-        ticketId: ticket._id,
-        traceId,
-        actor: "system",
-        action: "ASSIGNED_TO_HUMAN",
-        meta: {},
-        timestamp: new Date()
-      });
     }
 
+    await AuditLog.create({
+      ticketId: ticket._id,
+      traceId,
+      actor: "system",
+      action: autoClosed ? "AUTO_CLOSED" : "ASSIGNED_TO_HUMAN",
+      meta: { confidence, autoClosed },
+      timestamp: new Date()
+    });
+
+    // 5️⃣ Save AgentSuggestion
     const suggestion = await AgentSuggestion.create({
       ticketId: ticket._id,
       predictedCategory,
@@ -125,4 +123,16 @@ router.post("/triage", async (req, res) => {
   }
 });
 
+router.get("/suggestions/:ticketId", async (req, res) => {
+  try {
+    const suggestions = await AgentSuggestion.find({ ticketId: req.params.ticketId });
+    if (!suggestions || suggestions.length === 0) {
+      return res.status(404).json({ error: "No suggestions found for this ticket" });
+    }
+    res.json(suggestions);
+  } catch (err) {
+    console.error("Error fetching suggestions:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
 module.exports = router;

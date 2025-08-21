@@ -50,35 +50,79 @@
 
 // module.exports = router;
 
-
 const express = require("express");
-const Ticket = require("../models/Ticket");
-const authMiddleware = require("../middleware/authMiddleware");
-const axios = require("axios"); 
-
 const router = express.Router();
+const Ticket = require("../models/Ticket");
+const AuditLog = require("../models/AuditLog");
+const { v4: uuidv4 } = require("uuid");
+const axios = require("axios");
+const authMiddleware = require("../middleware/authMiddleware");
 
+// Create a new ticket
 router.post("/", authMiddleware, async (req, res) => {
   try {
+    // Ensure user info is attached from authMiddleware
+    const userId = req.user.id;
+
+    // Create ticket with createdBy
     const ticket = new Ticket({
       title: req.body.title,
       description: req.body.description,
       category: req.body.category || "other",
-      createdBy: req.user.id
+      status: "open",
+      createdBy: userId,      // <-- important
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
 
     await ticket.save();
 
-    try {
-      await axios.post(`http://localhost:${process.env.PORT}/api/agent/triage`, {
-        ticketId: ticket._id
-      });
-    } catch (err) {
-      console.error("Failed to trigger agent triage:", err.message);
-    }
+    // Audit log for ticket creation
+    const traceId = uuidv4();
+    await AuditLog.create({
+      ticketId: ticket._id,
+      traceId,
+      actor: "user",
+      action: "TICKET_CREATED",
+      meta: { title: ticket.title },
+      timestamp: new Date(),
+    });
+
+    // Trigger agent triage asynchronously
+    axios
+      .post("http://localhost:5000/api/agent/triage", {
+        ticketId: ticket._id,
+      })
+      .catch((err) => console.error("Triage failed:", err.message));
 
     res.status(201).json(ticket);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get all tickets for the logged-in user
+router.get("/", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const tickets = await Ticket.find({ createdBy: userId }).sort({ createdAt: -1 });
+    res.json(tickets);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Get ticket by ID
+router.get("/:id", authMiddleware, async (req, res) => {
+  try {
+    const ticket = await Ticket.findById(req.params.id);
+    if (!ticket) return res.status(404).json({ message: "Ticket not found" });
+    // Optional: restrict access to owner or agents
+    res.json(ticket);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+module.exports = router;

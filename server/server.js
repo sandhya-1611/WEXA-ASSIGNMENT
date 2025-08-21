@@ -12,7 +12,9 @@ const authRoutes = require("./routes/authRoutes");
 const ticketRoutes = require("./routes/ticketRoutes");
 const kbRoutes = require("./routes/kbRoutes");
 const agentRoutes = require("./routes/agentRoutes");
+const configRoutes = require("./routes/configRoutes");
 
+app.use("/api/config", configRoutes);
 app.use("/api/agent", agentRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/tickets", ticketRoutes);

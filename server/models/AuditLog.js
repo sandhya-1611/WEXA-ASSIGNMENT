@@ -1,37 +1,12 @@
-const AuditLog = require("../models/AuditLog");
+const mongoose = require("mongoose");
 
-await AuditLog.create({
-  ticketId: ticket._id,
-  traceId,
-  actor: "system",
-  action: "AGENT_CLASSIFIED",
-  meta: { predictedCategory, confidence },
-  timestamp: new Date()
+const auditLogSchema = new mongoose.Schema({
+  ticketId: { type: mongoose.Schema.Types.ObjectId, ref: "Ticket", required: true },
+  traceId: { type: String, required: true },
+  actor: { type: String, enum: ["system", "agent", "user"], required: true },
+  action: { type: String, required: true },
+  meta: { type: Object },
+  timestamp: { type: Date, default: Date.now }
 });
 
-await AuditLog.create({
-  ticketId: ticket._id,
-  traceId,
-  actor: "system",
-  action: "KB_RETRIEVED",
-  meta: { articleIds: citations },
-  timestamp: new Date()
-});
-
-await AuditLog.create({
-  ticketId: ticket._id,
-  traceId,
-  actor: "system",
-  action: "DRAFT_GENERATED",
-  meta: { draftReply },
-  timestamp: new Date()
-});
-
-await AuditLog.create({
-  ticketId: ticket._id,
-  traceId,
-  actor: "system",
-  action: autoClosed ? "AUTO_CLOSED" : "ASSIGNED_TO_HUMAN",
-  meta: { confidence, autoClosed },
-  timestamp: new Date()
-});
+module.exports = mongoose.model("AuditLog", auditLogSchema);
